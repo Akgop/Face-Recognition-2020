@@ -1,0 +1,114 @@
+% size
+row=112; col=92; P = 48;  % 112x92 image x 48
+% timer start
+tic;
+% read Training image
+imgbuf_Tr = zeros(row,col,P);
+sum_Tr = zeros(row,col,'double');
+for i = 1:1:6  % P개의 training vector를 읽음
+    for j = 1:1:8
+        img_path_Tr = "./Training/set_" + i + "/" + j + ".bmp";
+        img_tmp = imread(img_path_Tr);
+        imgbuf_Tr(:,:,8*(i-1)+j) = img_tmp(:,:,1);  % imgbuf_Tr = 모든 data 읽음 set1 부터 set6까지
+        sum_Tr = sum_Tr + cast(img_tmp(:,:,1), 'double');       % sum_Tr = 합
+    end
+end
+average_Tr = sum_Tr / P;      % training vector의 평균을 구함
+%% PCA
+% normalize, x - m = x': 112x92x48 normalized vector를 구함
+normalized_Tr = zeros(row,col,P);
+for i = 1:1:P
+    normalized_Tr(:,:,i) = imgbuf_Tr(:,:,i) - average_Tr;
+end
+% 2D->1D flatten NxP, P = 48, N(row*col) = 10304
+np_Tr = zeros(row*col,P); % 10304x48 size
+for i = 1:1:P
+    np_Tr(:,i) = reshape(normalized_Tr(:,:,i), [row*col,1]);
+end
+% covariance matrix : x*xt
+cov_Tr = (np_Tr * np_Tr.')/(row*col);  % 10304x10304
+[e_vector, e_value] = eigs(cov_Tr, 10);     % 10304x48
+% projection - representative vector(coefficients)
+pj_Tr = zeros(10,P);
+for i = 1:1:P
+    pj_Tr(:,i) = e_vector.' * np_Tr(:,i);  % 10x48
+end
+%% LDA
+% 평균 구하기
+pj_avg_Tr = zeros(10,6);
+pj_sum_Tr = zeros(10,1);
+for i = 1:1:6
+    for j = 1:1:8
+        pj_avg_Tr(:,i) = pj_avg_Tr(:,i) + pj_Tr(:,8*(i-1)+j);
+        pj_sum_Tr = pj_sum_Tr + pj_Tr(:,8*(i-1)+j);
+    end
+    pj_avg_Tr = pj_avg_Tr / 6;
+end
+pj_total_avg_Tr = pj_sum_Tr / 48;
+% normalize
+pj_norm_Tr = zeros(10,48);
+for i = 1:1:P
+    pj_norm_Tr(:,i) = pj_Tr(:,i) - pj_total_avg_Tr;
+end
+% 클래스간 거리
+pj_between_norm_Tr = zeros(10,6); % 10x6
+for i = 1:1:6
+    pj_between_norm_Tr(:,i) = abs(pj_avg_Tr(:,i) - pj_total_avg_Tr);
+end
+% 클래스 내 분산
+pj_within_norm_Tr = zeros(10,P);   %편차 10x48
+for i = 1:1:6
+    for j = 1:1:8       % 클래스 내부 편차 계산
+        pj_within_norm_Tr(:,8*(i-1)+j) = pj_Tr(:,8*(i-1)+j) - pj_avg_Tr(:,i);
+    end
+end
+% LDA 공분산 행렬
+pj_within_cov_Tr = pj_within_norm_Tr * pj_within_norm_Tr.';  % D_intra
+pj_between_cov_Tr = pj_between_norm_Tr * pj_between_norm_Tr.';   % D_inter
+[e_vector2, e_value2] = eigs((pinv(pj_within_cov_Tr)*pj_between_cov_Tr), 5);
+% v에 projection된 거리 & 분산 -> v_t * D
+pjpj_Tr = zeros(5,P);
+for i = 1:1:P   % 3x48
+    pjpj_Tr(:,i) = e_vector2.' * pj_norm_Tr(:,i);
+end
+% Read Test Image
+imgbuf_Te = zeros(row,col,12);
+for i = 1:1:12
+    img_path_Te = "./Test/" + i + ".bmp";
+    img_tmp = imread(img_path_Te);
+    imgbuf_Te(:,:,i) = img_tmp(:,:,1);
+end
+% normalize Test Image
+normalized_Te = zeros(row,col,12);
+for i = 1:1:12
+    normalized_Te(:,:,i) = imgbuf_Te(:,:,i) - average_Tr;
+end
+% flatten Test Image
+np_Te = zeros(row*col,12);
+for i = 1:1:12
+    np_Te(:,i) = reshape(normalized_Te(:,:,i), [row*col,1]);
+end
+% mapping1
+pj_Te = zeros(10,12);
+for i = 1:1:12
+    pj_Te(:,i) = e_vector.' * np_Te(:,i);
+end
+% mapping2
+pjpj_Te = zeros(5,12);
+for i = 1:1:12
+    pjpj_Te(:,i) = e_vector2.' * pj_Te(:,i);
+end
+% Euclidean Distance
+ed = zeros(5,48);
+for i = 1:1:12
+    for j = 1:1:48
+        dist = pjpj_Te(:,i) - pjpj_Tr(:,j);
+        ed(i, j) = sum(dist.*dist, 'all');  % element-wise square
+    end
+end
+% classification
+[result, index] = min(ed, [], 2);
+% print result
+answer = fix((index - 0.1)/8) + 1;
+% stop timer
+toc;
